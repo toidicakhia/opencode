@@ -1,4 +1,13 @@
-import { Browser, BrowserDriver, BrowserDriverError, OpenCode, type BrowserAttachment } from "@opencode-ai/client/node"
+import {
+  Browser,
+  BrowserDriver,
+  BrowserDriverError,
+  OpenCode,
+  type BrowserAttachment,
+  type ChromiumController,
+  type ChromiumDriver,
+  type ChromiumPort,
+} from "@opencode-ai/client/node"
 
 const state: Browser.State = {
   url: "about:blank",
@@ -19,6 +28,8 @@ const factory: BrowserDriver<{ readonly proxyURL: string }> = (context) => ({
   dispose: () => undefined,
 })
 const driver = BrowserDriver.define(factory)
+declare const port: ChromiumPort<{ readonly page: true }>
+const chromium: ChromiumDriver<{ readonly page: true }> = BrowserDriver.chromium(() => port)
 
 declare const client: ReturnType<typeof OpenCode.make>
 const attachment: Promise<BrowserAttachment<{ readonly proxyURL: string }>> = client.browser.attach({
@@ -27,3 +38,9 @@ const attachment: Promise<BrowserAttachment<{ readonly proxyURL: string }>> = cl
 })
 
 void attachment
+const chromiumAttachment: Promise<BrowserAttachment<ChromiumController<{ readonly page: true }>>> =
+  client.browser.attach({
+    sessionID: "ses_chromium_type_fixture",
+    driver: chromium,
+  })
+void chromiumAttachment

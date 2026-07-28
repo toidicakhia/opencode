@@ -16,25 +16,26 @@ The Promise root remains structural and has no Core, Effect, Schema, Protocol, o
 
 ## Node browser attachments
 
-The Node entrypoint owns the control connection, Session lease, authenticated proxy, and network tunnels. Consumers provide a browser adapter once with `BrowserDriver.define`; normal attachment calls only provide a Session ID and that descriptor.
+The Node entrypoint owns the control connection, Session lease, authenticated proxy, and network tunnels. Chromium hosts provide a small platform port once with `BrowserDriver.chromium`; the SDK owns command semantics, CDP input, snapshots, generations, cancellation, and limits.
 
 ```ts
-import { BrowserDriver, BrowserDriverError, OpenCode } from "@opencode-ai/client/node"
+import { BrowserDriver, OpenCode } from "@opencode-ai/client/node"
 
-const driver = BrowserDriver.define(async ({ proxy, signal }) => {
-  const browser = await launchBrowser({ proxy, signal })
+const driver = BrowserDriver.chromium(async ({ proxy, signal }) => {
+  const view = await createChromiumView({ proxy, signal })
   return {
-    resource: browser,
-    state: () => browser.state(),
-    subscribe: (listener) => browser.subscribe(listener),
-    execute: async (command, options) => {
-      try {
-        return await browser.execute(command, options)
-      } catch (cause) {
-        throw new BrowserDriverError("internal", "Browser command failed", { cause })
-      }
-    },
-    dispose: () => browser.close(),
+    resource: view,
+    state: () => view.state(),
+    subscribe: (listener) => view.subscribe((state, mainDocumentChanged) => listener({ state, mainDocumentChanged })),
+    navigate: (url) => view.navigate(url),
+    back: () => view.back(),
+    forward: () => view.forward(),
+    reload: () => view.reload(),
+    stop: () => view.stop(),
+    send: (method, params) => view.sendCDP(method, params),
+    viewport: () => view.viewport(),
+    screenshot: ({ maxDimension }) => view.capturePNG({ maxDimension }),
+    dispose: () => view.close(),
   }
 })
 
@@ -44,6 +45,8 @@ const client = OpenCode.make({
 })
 const attachment = await client.browser.attach({ sessionID, driver })
 
+await attachment.resource.navigate("example.com")
+const view = attachment.resource.resource
 await attachment.close()
 ```
 
@@ -51,7 +54,9 @@ await attachment.close()
 
 Driver factories should return after configuring their resource rather than await a proxied navigation: tunnel dialing is deliberately held behind the first lease acknowledgement, which is published after the driver supplies its initial state.
 
-`BrowserDriver` descriptors are structural factory functions, so adapters remain compatible across duplicate client package instances. The Node entrypoint also re-exports canonical `Browser` contracts. Throw `BrowserDriverError` for typed command failures; structurally equivalent errors are accepted only when their `code` is a valid `Browser.ErrorCode`.
+Port state events set `mainDocumentChanged` only when the main document changes; this advances the public generation and invalidates element refs. `send` must dispatch CDP calls in invocation order. `screenshot` returns PNG bytes and dimensions, proportionally scaled to `maxDimension` without upscaling. The returned controller serializes local navigation with remote commands; `stop` immediately interrupts active work, and controller disposal is idempotent. An aborted or timed-out operation that reached the platform disposes the port so late native completion cannot cross the queue fence.
+
+`BrowserDriver` descriptors are structural factory functions, so adapters remain compatible across duplicate client package instances. The Node entrypoint also re-exports canonical `Browser` contracts. `BrowserDriver.define` remains the advanced escape hatch for non-Chromium semantics; throw `BrowserDriverError` for typed command failures there. Structurally equivalent errors are accepted only when their `code` is a valid `Browser.ErrorCode`.
 
 Effect consumers construct canonical decoded inputs:
 

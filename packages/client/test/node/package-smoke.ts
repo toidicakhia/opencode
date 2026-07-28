@@ -127,6 +127,7 @@ function nodeScenario(moduleURL: string) {
 const sdk = await import(${JSON.stringify(moduleURL)})
 if (typeof sdk.OpenCode.make !== "function") throw new Error("Missing OpenCode.make")
 if (typeof sdk.BrowserDriver.define !== "function") throw new Error("Missing BrowserDriver.define")
+if (typeof sdk.BrowserDriver.chromium !== "function") throw new Error("Missing BrowserDriver.chromium")
 if (typeof sdk.BrowserDriverError !== "function") throw new Error("Missing BrowserDriverError")
 if (!sdk.Browser.State) throw new Error("Missing canonical Browser export")
 

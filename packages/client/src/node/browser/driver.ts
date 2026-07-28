@@ -1,4 +1,5 @@
 import type { Browser } from "@opencode-ai/schema/browser"
+import { chromiumDriver, type ChromiumDriver, type ChromiumPort } from "./chromium.js"
 
 /** Connection details for the attachment's private authenticated proxy. */
 export interface BrowserProxy {
@@ -49,6 +50,12 @@ export const BrowserDriver = {
   define<Resource>(create: BrowserDriverFactory<Resource>): BrowserDriver<Resource> {
     if (typeof create !== "function") throw new TypeError("Browser driver factory must be a function")
     return Object.freeze(create)
+  },
+  chromium<Resource>(
+    create: (context: BrowserDriverContext) => PromiseLike<ChromiumPort<Resource>> | ChromiumPort<Resource>,
+  ): ChromiumDriver<Resource> {
+    if (typeof create !== "function") throw new TypeError("Chromium port factory must be a function")
+    return Object.freeze(chromiumDriver(create))
   },
 }
 
