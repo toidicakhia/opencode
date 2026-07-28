@@ -10,9 +10,17 @@ import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { setForceFocus } from "./debug"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
-import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
+import {
+  getPinchZoomEnabled,
+  getWindowID,
+  isTrustedRendererUrl,
+  setPinchZoomEnabled,
+  setTitlebar,
+  updateTitlebar,
+} from "./windows"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
+import type { BrowserDesktop } from "./browser-desktop"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -41,6 +49,7 @@ type Deps = {
   setBackgroundColor: (color: string) => void
   exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
+  browser: BrowserDesktop.Controller
 }
 
 export function registerIpcHandlers(deps: Deps) {
@@ -88,6 +97,19 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),
   )
+  ipcMain.on("browser-pane-layout", (event, binding: unknown, layout: unknown) => {
+    const win = trustedWindow(event)
+    if (!win) return
+    try {
+      deps.browser.setLayout(win, binding, layout)
+    } catch {}
+  })
+  ipcMain.handle("browser-pane-command", (event, binding: unknown, command: unknown) => {
+    return deps.browser.command(requireTrustedWindow(event), binding, command)
+  })
+  ipcMain.handle("browser-pane-state", (event, binding: unknown) => {
+    return deps.browser.state(requireTrustedWindow(event), binding)
+  })
   ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     try {
       const store = getStore(name)
@@ -268,6 +290,17 @@ export function registerIpcHandlers(deps: Deps) {
       relaunch: deps.relaunch,
     })
   })
+}
+
+function trustedWindow(event: IpcMainEvent | IpcMainInvokeEvent) {
+  if (!isTrustedRendererUrl(event.senderFrame?.url)) return undefined
+  return BrowserWindow.fromWebContents(event.sender) ?? undefined
+}
+
+function requireTrustedWindow(event: IpcMainInvokeEvent) {
+  const win = trustedWindow(event)
+  if (!win) throw new Error("Untrusted browser pane IPC sender")
+  return win
 }
 
 export function sendMenuCommand(win: BrowserWindow, id: string) {

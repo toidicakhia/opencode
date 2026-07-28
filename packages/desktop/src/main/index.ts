@@ -48,6 +48,7 @@ import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
+import { createBrowserDesktop } from "./browser-desktop"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -111,6 +112,7 @@ function ensureLoopbackNoProxy() {
 }
 
 const main = Effect.gen(function* () {
+  const browser = createBrowserDesktop()
   contextMenu({ showSaveImageAs: true, showLookUpSelection: false, showSearchWithGoogle: false })
 
   // on macOS apps run in `/` which can cause issues with ripgrep
@@ -221,11 +223,13 @@ const main = Effect.gen(function* () {
 
   app.on("before-quit", () => {
     setAppQuitting()
+    browser.dispose()
     void stopSidecars()
   })
 
   app.on("will-quit", () => {
     setAppQuitting()
+    browser.dispose()
     void stopSidecars()
   })
 
@@ -244,6 +248,7 @@ const main = Effect.gen(function* () {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
       setAppQuitting()
+      browser.dispose()
       void stopSidecars().finally(() => app.exit(0))
     })
   }
@@ -298,6 +303,7 @@ const main = Effect.gen(function* () {
     setBackgroundColor: (color) => setBackgroundColor(color),
     exportDebugLogs: () => exportDebugLogs(),
     recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
+    browser,
   })
   registerWslIpcHandlers(wslServers)
   void updater.start()
