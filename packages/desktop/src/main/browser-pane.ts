@@ -86,6 +86,7 @@ type Entry = {
   readonly masks: View[]
   readonly lifecycle: BrowserPaneLifecycle<Page>
   desired?: DesiredLayout
+  failed?: BrowserPaneIdentity
   disposed: boolean
   readonly cleanups: Array<() => void>
   state: BrowserPaneState
@@ -300,6 +301,20 @@ export function createBrowserPaneController(clients: BrowserPaneClients) {
         cleanup()
         if (page.closed) return
         const entry = entries.get(win.id)
+        if (signal.aborted) {
+          const identity = entry?.lifecycle.crash(page)
+          if (entry && identity) {
+            entry.desired = undefined
+            entry.failed = identity
+            publish(entry, undefined, {
+              identity,
+              error: signal.reason instanceof Error ? signal.reason.message : "The browser attachment closed",
+            })
+            return
+          }
+          disposePage(page)
+          return
+        }
         if (entry?.lifecycle.contains(page)) {
           replacePage(entry, page, "The browser context restarted after its attachment closed")
           return
@@ -452,6 +467,11 @@ export function createBrowserPaneController(clients: BrowserPaneClients) {
       return
     }
 
+    if (next.failed && sameBrowserPaneIdentity(next.failed, identity)) {
+      next.desired = { identity, layout }
+      return
+    }
+    next.failed = undefined
     next.desired = { identity, layout }
     const state = next.lifecycle.state()
     if (!state || !sameBrowserPaneIdentity(state, identity)) {
@@ -494,6 +514,7 @@ export function createBrowserPaneController(clients: BrowserPaneClients) {
 
   const beginAttachment = (entry: Entry, identity: BrowserPaneIdentity, layout: AttachedLayout) => {
     hideEntry(entry)
+    entry.failed = undefined
     entry.state = emptyBrowserPaneState()
     entry.desired = { identity, layout }
     publish(entry, undefined, { identity })
@@ -584,6 +605,7 @@ export function createBrowserPaneController(clients: BrowserPaneClients) {
     entry.disposed = true
     if (entries.get(entry.win.id) === entry) entries.delete(entry.win.id)
     entry.desired = undefined
+    entry.failed = undefined
     entry.lifecycle.dispose()
     entry.cleanups.splice(0).forEach((cleanup) => cleanup())
     if (!entry.win.isDestroyed()) entry.masks.forEach((mask) => entry.win.contentView.removeChildView(mask))
@@ -645,6 +667,7 @@ function detach(entry: Entry, identity?: BrowserPaneIdentity) {
   if (!owner || (identity && !sameBrowserPaneIdentity(owner, identity))) return false
   hideEntry(entry)
   entry.desired = undefined
+  entry.failed = undefined
   entry.lifecycle.release(identity)
   return true
 }
