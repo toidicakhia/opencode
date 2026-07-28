@@ -351,7 +351,7 @@ export function emitPromise(
       {
         path: "index.ts",
         content:
-          'export { ClientError, type ClientErrorReason } from "./client-error"\nexport * as OpenCode from "./client"\nexport * from "./types"\n',
+          'export { ClientError, type ClientErrorReason } from "./client-error.js"\nexport * as OpenCode from "./client.js"\nexport * from "./types.js"\n',
       },
     ],
   }
@@ -371,7 +371,9 @@ function renderEffectShape(
         .map((field) => {
           const schema = effectInputSchema(endpoint, field)
           if (schema === undefined) {
-            throw new GenerationError({ reason: `Missing Effect input schema: ${endpoint.group}.${endpoint.endpoint.identifier}.${field.name}` })
+            throw new GenerationError({
+              reason: `Missing Effect input schema: ${endpoint.group}.${endpoint.endpoint.identifier}.${field.name}`,
+            })
           }
           return `readonly ${JSON.stringify(field.name)}${field.optional ? "?" : ""}: ${effectType(schema, references, imports)}`
         })
@@ -453,11 +455,7 @@ function effectTypeReferences(input: ReadonlyArray<EffectTypeReference>) {
   return { names, asts, brands }
 }
 
-function effectType(
-  schema: Schema.Top,
-  references: ReturnType<typeof effectTypeReferences>,
-  imports: Set<string>,
-) {
+function effectType(schema: Schema.Top, references: ReturnType<typeof effectTypeReferences>, imports: Set<string>) {
   const projected = Schema.toType(schema)
   const direct = references.asts.get(schema.ast) ?? references.asts.get(projected.ast)
   if (direct !== undefined) {
@@ -595,7 +593,7 @@ function renderEffectFiles(groups: ReadonlyArray<Group>): Output["files"] {
     { path: "client.ts", content: renderClient(groups) },
     {
       path: "index.ts",
-      content: 'export { ClientError } from "./client-error"\nexport * as OpenCode from "./client"\n',
+      content: 'export { ClientError } from "./client-error.js"\nexport * as OpenCode from "./client.js"\n',
     },
   ]
 }
@@ -713,7 +711,7 @@ function renderImportedEffectFiles(
     { path: "client.ts", content: client },
     {
       path: "index.ts",
-      content: 'export { ClientError } from "./client-error"\nexport * as OpenCode from "./client"\n',
+      content: 'export { ClientError } from "./client-error.js"\nexport * as OpenCode from "./client.js"\n',
     },
   ]
 }
@@ -1313,13 +1311,29 @@ export function write(
       output.files,
       (file) =>
         Effect.tryPromise({
-          try: () => format(file.content, { filepath: file.path, parser: "typescript", semi: false, printWidth: 120 }),
+          try: () =>
+            format(withJsExtensions(file.content), {
+              filepath: file.path,
+              parser: "typescript",
+              semi: false,
+              printWidth: 120,
+            }),
           catch: (error) => new GenerationError({ reason: `Failed to format ${file.path}: ${String(error)}` }),
         }).pipe(Effect.flatMap((content) => fs.writeFileString(join(directory, file.path), content))),
       { concurrency: 8, discard: true },
     )
     yield* fs.writeFileString(manifest, JSON.stringify(output.files.map((file) => file.path).sort(), null, 2) + "\n")
   })
+}
+
+function withJsExtensions(content: string) {
+  return content
+    .replaceAll(/(from ")(\.\.?\/[^"\n]+)(")/g, (_match, start: string, path: string, end: string) =>
+      /\.[cm]?[jt]sx?$/.test(path) ? `${start}${path}${end}` : `${start}${path}.js${end}`,
+    )
+    .replaceAll(/(import\(")(\.\.?\/[^"\n]+)("\))/g, (_match, start: string, path: string, end: string) =>
+      /\.[cm]?[jt]sx?$/.test(path) ? `${start}${path}${end}` : `${start}${path}.js${end}`,
+    )
 }
 
 function isSafeOutputPath(path: string) {

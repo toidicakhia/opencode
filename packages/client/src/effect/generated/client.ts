@@ -3,7 +3,7 @@ import { Effect, Stream, Schema } from "effect"
 import { Sse } from "effect/unstable/encoding"
 import { HttpClientError } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
-import { ClientApi } from "../../contract"
+import { ClientApi } from "../../contract.js"
 import type {
   Endpoint0_0Output,
   Endpoint0_1Input,
@@ -218,7 +218,7 @@ import type {
   Endpoint27_1Input,
   Endpoint27_1Output,
 } from "../api/api.js"
-import { ClientError } from "./client-error"
+import { ClientError } from "./client-error.js"
 
 type RawClient = HttpApiClient.ForApi<typeof ClientApi>
 

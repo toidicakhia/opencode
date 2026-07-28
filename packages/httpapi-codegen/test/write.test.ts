@@ -8,14 +8,14 @@ describe("HttpApiCodegen.write", () => {
     const writes: Array<{ readonly path: string; readonly content: string }> = []
     const output: Output = {
       operations: [],
-      files: [{ path: "session.ts", content: "export const session = {}" }],
+      files: [{ path: "session.ts", content: 'export { session } from "../../session-data"' }],
     }
 
     return Effect.gen(function* () {
       yield* write(output, "/generated")
 
       expect(writes).toEqual([
-        { path: "/generated/session.ts", content: "export const session = {}\n" },
+        { path: "/generated/session.ts", content: 'export { session } from "../../session-data.js"\n' },
         { path: "/generated/.httpapi-codegen.json", content: '[\n  "session.ts"\n]\n' },
       ])
     }).pipe(
