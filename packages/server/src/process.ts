@@ -2,6 +2,7 @@ export * as ServerProcess from "./process"
 
 import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
+import { BrowserHost } from "@opencode-ai/core/browser-host"
 import { ServiceStatus } from "@opencode-ai/protocol/groups/health"
 import { hasPtyConnectTicketURL } from "@opencode-ai/protocol/groups/pty"
 import { Cause, Context, Deferred, Effect, Exit, Layer, Option, Ref, Schema, Scope } from "effect"
@@ -15,6 +16,7 @@ import { withoutParentSpan } from "./request-tracing"
 import { createRoutes } from "./routes"
 import { ServerInfo } from "./server-info"
 import { Status } from "./service-status"
+import { BrowserTunnelServer } from "./browser-tunnel"
 import type { ServerOptions } from "./options"
 
 export interface Lifecycle<E = never, R = never> {
@@ -46,6 +48,7 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
   })
   const bound = yield* listen({ hostname, port })
   const application = yield* Ref.make(Option.none<App>())
+  const applicationShutdown = yield* Ref.make(Effect.void)
   // Request fibers may continue inbound trace context, but must not inherit the server startup parent.
   yield* bound.http
     .serve(
@@ -68,6 +71,7 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
   yield* Effect.addFinalizer(() =>
     status.beginStopping.pipe(
       Effect.andThen(Ref.set(application, Option.none())),
+      Effect.andThen(Ref.get(applicationShutdown).pipe(Effect.flatMap((shutdown) => shutdown))),
       Effect.andThen(Effect.sync(() => bound.server.closeAllConnections())),
     ),
   )
@@ -94,6 +98,12 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
       )
     }
     yield* Ref.set(application, Option.some(Context.get(context, HttpRouter.HttpRouter).asHttpEffect()))
+    yield* Ref.set(
+      applicationShutdown,
+      Context.get(context, BrowserTunnelServer.Service).shutdown.pipe(
+        Effect.andThen(Context.get(context, BrowserHost.Service).shutdown),
+      ),
+    )
     yield* status.ready
     return { address: bound.http.address, shutdown: Deferred.await(shutdown) }
   }).pipe(
@@ -130,9 +140,39 @@ function bind(hostname: string, port: number) {
     const parentScope = yield* Scope.Scope
     const serverScope = yield* Scope.fork(parentScope)
     const server = createServer()
+    const sockets = new Set<import("node:net").Socket>()
+    const onConnection = (socket: import("node:net").Socket) => {
+      sockets.add(socket)
+      socket.once("close", () => sockets.delete(socket))
+    }
+    const onUpgrade = (_request: unknown, socket: import("node:net").Socket) => sockets.add(socket)
+    server.on("connection", onConnection)
+    server.on("upgrade", onUpgrade)
     return yield* Effect.gen(function* () {
       const http = yield* NodeHttpServer.make(() => server, { port, host: hostname })
       yield* Effect.addFinalizer(() => Effect.sync(() => server.closeAllConnections()))
+      // Node's closeAllConnections deliberately excludes upgraded sockets.
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          server.off("connection", onConnection)
+          server.off("upgrade", onUpgrade)
+          server.closeAllConnections()
+        }).pipe(
+          Effect.andThen(
+            Effect.suspend(() => {
+              if (sockets.size === 0) return Effect.void
+              return Effect.sleep("1 second").pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    for (const socket of sockets) socket.destroy()
+                    sockets.clear()
+                  }),
+                ),
+              )
+            }),
+          ),
+        ),
+      )
       return { http, server, scope: serverScope }
     }).pipe(
       Effect.provideService(Scope.Scope, serverScope),
@@ -241,7 +281,8 @@ function unavailable(status: Status.State) {
 /**
  * The managed server owns restart continuity: it resumes Sessions the previous server suspended and
  * suspends its own active Sessions on graceful shutdown. Suspension runs while the drains are still
- * alive: connections close first, this finalizer runs next, and Session execution teardown follows.
+ * alive: request admission stops first, application-owned transports receive their shutdown signal,
+ * listener connections close, and this finalizer runs during application teardown.
  */
 const installRestartContinuity = Effect.fnUntraced(function* (restart: SessionRestart.Interface) {
   yield* Effect.forkScoped(restart.resumeSuspendedSessions)

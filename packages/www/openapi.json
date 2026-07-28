@@ -160,6 +160,134 @@
         "summary": "Get server information"
       }
     },
+    "/api/browser/control": {
+      "get": {
+        "tags": [
+          "browser"
+        ],
+        "operationId": "v2.browser.control.connect",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WebSocket Origin is not allowed."
+          },
+          "409": {
+            "description": "ConflictError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictError"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "WebSocket subprotocol opencode.browser.control.v1 is required."
+          }
+        },
+        "description": "Establish an authenticated WebSocket carrying Session-scoped browser attachments and semantic browser commands.",
+        "summary": "Connect desktop browser host",
+        "x-websocket": true,
+        "x-websocket-subprotocol": "opencode.browser.control.v1",
+        "x-websocket-incoming": "BrowserControl.FromDesktop",
+        "x-websocket-outgoing": "BrowserControl.FromServer"
+      }
+    },
+    "/api/browser/tunnel": {
+      "get": {
+        "tags": [
+          "browser"
+        ],
+        "operationId": "v2.browser.tunnel.connect",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WebSocket Origin is not allowed."
+          },
+          "426": {
+            "description": "WebSocket subprotocol opencode.browser.tunnel.v1 is required."
+          },
+          "503": {
+            "description": "ServiceUnavailableError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Establish an authenticated WebSocket carrying one TCP stream dialed from the OpenCode server.",
+        "summary": "Open browser network tunnel",
+        "x-websocket": true,
+        "x-websocket-subprotocol": "opencode.browser.tunnel.v1",
+        "x-websocket-incoming": "BrowserTunnel.FromDesktop and binary DATA frames",
+        "x-websocket-outgoing": "BrowserTunnel.FromServer and binary DATA frames"
+      }
+    },
     "/api/location": {
       "get": {
         "tags": [
@@ -12012,6 +12140,64 @@
         ],
         "additionalProperties": false
       },
+      "ConflictError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "ConflictError"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "_tag",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "ServiceUnavailableError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "ServiceUnavailableError"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "_tag",
+          "message"
+        ],
+        "additionalProperties": false
+      },
       "Location.Info": {
         "type": "object",
         "properties": {
@@ -12838,35 +13024,6 @@
         ],
         "additionalProperties": false
       },
-      "ConflictError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": [
-              "ConflictError"
-            ]
-          },
-          "message": {
-            "type": "string"
-          },
-          "resource": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "_tag",
-          "message"
-        ],
-        "additionalProperties": false
-      },
       "CommandNotFoundError": {
         "type": "object",
         "properties": {
@@ -13055,35 +13212,6 @@
           "sessionID",
           "timeCreated",
           "type"
-        ],
-        "additionalProperties": false
-      },
-      "ServiceUnavailableError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": [
-              "ServiceUnavailableError"
-            ]
-          },
-          "message": {
-            "type": "string"
-          },
-          "service": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "_tag",
-          "message"
         ],
         "additionalProperties": false
       },
@@ -13705,7 +13833,14 @@
             "type": "string"
           },
           "name": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -13715,7 +13850,7 @@
         ],
         "additionalProperties": false
       },
-      "LLM.ToolContent": {
+      "Tool.Content": {
         "anyOf": [
           {
             "$ref": "#/components/schemas/Tool.TextContent"
@@ -13741,12 +13876,12 @@
             "type": "array",
             "prefixItems": [
               {
-                "$ref": "#/components/schemas/LLM.ToolContent"
+                "$ref": "#/components/schemas/Tool.Content"
               }
             ],
             "minItems": 1,
             "items": {
-              "$ref": "#/components/schemas/LLM.ToolContent"
+              "$ref": "#/components/schemas/Tool.Content"
             }
           },
           "metadata": {
@@ -13795,12 +13930,12 @@
             "type": "array",
             "prefixItems": [
               {
-                "$ref": "#/components/schemas/LLM.ToolContent"
+                "$ref": "#/components/schemas/Tool.Content"
               }
             ],
             "minItems": 1,
             "items": {
-              "$ref": "#/components/schemas/LLM.ToolContent"
+              "$ref": "#/components/schemas/Tool.Content"
             }
           },
           "metadata": {
@@ -17114,6 +17249,49 @@
         ],
         "additionalProperties": false
       },
+      "Tool.FileContent1": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "file"
+            ]
+          },
+          "uri": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "uri",
+          "mime"
+        ],
+        "additionalProperties": false
+      },
+      "Tool.Content1": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/Tool.TextContent"
+          },
+          {
+            "$ref": "#/components/schemas/Tool.FileContent1"
+          }
+        ]
+      },
       "Session.Message.ProviderState8": {
         "type": "object"
       },
@@ -17197,12 +17375,12 @@
                 "type": "array",
                 "prefixItems": [
                   {
-                    "$ref": "#/components/schemas/LLM.ToolContent"
+                    "$ref": "#/components/schemas/Tool.Content1"
                   }
                 ],
                 "minItems": 1,
                 "items": {
-                  "$ref": "#/components/schemas/LLM.ToolContent"
+                  "$ref": "#/components/schemas/Tool.Content1"
                 }
               },
               "metadata": {
@@ -17320,12 +17498,12 @@
                 "type": "array",
                 "prefixItems": [
                   {
-                    "$ref": "#/components/schemas/LLM.ToolContent"
+                    "$ref": "#/components/schemas/Tool.Content1"
                   }
                 ],
                 "minItems": 1,
                 "items": {
-                  "$ref": "#/components/schemas/LLM.ToolContent"
+                  "$ref": "#/components/schemas/Tool.Content1"
                 }
               },
               "metadata": {
@@ -29134,6 +29312,10 @@
     },
     {
       "name": "server"
+    },
+    {
+      "name": "browser",
+      "description": "Desktop browser host control and server-network tunnel routes."
     },
     {
       "name": "location"
