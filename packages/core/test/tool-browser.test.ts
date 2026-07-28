@@ -133,10 +133,10 @@ describe("BrowserTool", () => {
       ).toMatchObject({
         type: "object",
         required: ["url"],
-        properties: { url: { type: "string", allOf: [{ maxLength: 16_384 }] } },
+        properties: { url: { type: "string", maxLength: 16_384 } },
       })
       expect(snapshot.definitions.find((definition) => definition.name === "browser_fill")?.inputSchema).toMatchObject({
-        properties: { text: { type: "string", allOf: [{ maxLength: 10_000 }] } },
+        properties: { text: { type: "string", maxLength: 10_000 } },
       })
       expect(snapshot.definitions.find((definition) => definition.name === "browser_press")?.inputSchema).toMatchObject(
         {
