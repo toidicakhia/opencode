@@ -233,6 +233,28 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
     storage,
 
+    browserPane: {
+      setLayout: (binding, layout) => window.api.browserPane.setLayout(binding, layout),
+      command: (binding, command) => window.api.browserPane.command(binding, command),
+      subscribe: async (binding, callback) => {
+        let endpointRevision = -1
+        const update = (next: Awaited<ReturnType<typeof window.api.browserPane.state>>) => {
+          if (
+            next.serverKey !== binding.serverKey ||
+            next.sessionID !== binding.sessionID ||
+            next.bindingID !== binding.bindingID ||
+            next.endpointRevision < endpointRevision
+          )
+            return
+          endpointRevision = next.endpointRevision
+          callback(next.state)
+        }
+        const dispose = window.api.browserPane.onState(update)
+        update(await window.api.browserPane.state(binding))
+        return dispose
+      },
+    },
+
     updater: {
       state: updaterState,
       check: () => window.api.updater.check(),
