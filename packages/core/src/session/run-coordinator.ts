@@ -12,6 +12,8 @@ export interface Coordinator<Key, E> {
   readonly wake: (key: Key) => Effect.Effect<void>
   /** Stops active execution and waits for its cleanup. */
   readonly interrupt: (key: Key) => Effect.Effect<void>
+  /** Waits for the current execution to complete without starting a new one. Returns immediately if idle. */
+  readonly wait: (key: Key) => Effect.Effect<void>
 }
 
 type Entry<E> = {
@@ -100,5 +102,12 @@ export const make = <Key, E>(options: {
         return Fiber.interrupt(entry.owner)
       })
 
-    return { active: Effect.sync(() => new Set(active.keys())), run, wake, interrupt }
+    const wait = (key: Key): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const entry = active.get(key)
+        if (entry === undefined) return Effect.void
+        return Deferred.await(entry.done).pipe(Effect.catchAll(() => Effect.void))
+      })
+
+    return { active: Effect.sync(() => new Set(active.keys())), run, wake, interrupt, wait }
   })

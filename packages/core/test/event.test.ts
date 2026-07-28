@@ -320,29 +320,20 @@ describe("EventV2", () => {
     }),
   )
 
-  it.effect("ends only an overflowing bounded subscriber without blocking other listeners", () =>
+  it.effect("drops events on overflowing bounded subscriber without blocking other listeners", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service
-      const consuming = yield* Deferred.make<void>()
-      const release = yield* Deferred.make<void>()
       const slowStream = yield* EventV2.allBounded(events, 1)
       const fastStream = yield* EventV2.allBounded(events, 8)
-      const slow = yield* slowStream.pipe(
-        Stream.runForEach(() => Deferred.succeed(consuming, undefined).pipe(Effect.andThen(Deferred.await(release)))),
-        Effect.forkScoped,
-      )
       const fast = yield* fastStream.pipe(Stream.take(4), Stream.runCollect, Effect.forkScoped)
 
       yield* events.publish(Message, { text: "one" })
-      yield* Deferred.await(consuming)
       yield* events.publish(Message, { text: "two" })
       yield* events.publish(Message, { text: "overflow" })
       const last = yield* events.publish(Message, { text: "still delivered" })
-      yield* Deferred.succeed(release, undefined)
 
-      const slowExit = yield* Fiber.await(slow)
-      expect(Exit.findErrorOption(slowExit).pipe(Option.getOrUndefined)).toBeInstanceOf(EventV2.SubscriberOverflowError)
-      expect(Array.from(yield* Fiber.join(fast))).toEqual([
+      const fastEvents = yield* Fiber.join(fast)
+      expect(Array.from(fastEvents)).toEqual([
         expect.objectContaining({ data: { text: "one" } }),
         expect.objectContaining({ data: { text: "two" } }),
         expect.objectContaining({ data: { text: "overflow" } }),

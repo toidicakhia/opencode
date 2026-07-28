@@ -151,14 +151,8 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Ev
 
 export const allBounded = (events: Interface, capacity: number) =>
   Effect.gen(function* () {
-    const queue = yield* Queue.dropping<Payload, SubscriberOverflowError>(capacity)
-    const unsubscribe = yield* events.listen((event) =>
-      Queue.offer(queue, event).pipe(
-        Effect.flatMap((accepted) =>
-          accepted ? Effect.void : Queue.fail(queue, new SubscriberOverflowError({ capacity })).pipe(Effect.asVoid),
-        ),
-      ),
-    )
+    const queue = yield* Queue.dropping<Payload>(capacity)
+    const unsubscribe = yield* events.listen((event) => Queue.offer(queue, event).pipe(Effect.asVoid))
     yield* Effect.addFinalizer(() => unsubscribe.pipe(Effect.andThen(Queue.shutdown(queue)), Effect.asVoid))
     return Stream.fromQueue(queue)
   })

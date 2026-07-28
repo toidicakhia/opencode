@@ -177,8 +177,16 @@ const layer = Layer.effect(
       recoverOverflow?: typeof compaction.compactAfterOverflow,
     ) {
       const session = yield* getSession(sessionID)
-      if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
+      if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID) {
+        yield* Effect.logWarning("Session location mismatch, interrupting drain", {
+          sessionID,
+          sessionDirectory: session.location.directory,
+          sessionWorkspaceID: session.location.workspaceID,
+          runnerDirectory: location.directory,
+          runnerWorkspaceID: location.workspaceID,
+        })
         return yield* Effect.interrupt
+      }
       const agent = yield* agents.select(session.agent)
       const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
