@@ -21,9 +21,13 @@ const env = {
   OPENCODE_CHANNEL: process.env["OPENCODE_CHANNEL"],
   OPENCODE_VERSION: process.env["OPENCODE_VERSION"],
 }
+// GitHub Actions builds own preview versions. A local build reports the package version
+// instead of a 0.0.0 preview so `opencode --version` matches what was built.
+const LOCAL = !process.env["GITHUB_RUN_NUMBER"]
 const CHANNEL = await (async () => {
   if (env.OPENCODE_CHANNEL) return env.OPENCODE_CHANNEL
   if (env.OPENCODE_VERSION && !env.OPENCODE_VERSION.startsWith("0.0.0-")) return "latest"
+  if (LOCAL && !env.OPENCODE_VERSION) return "latest"
   const branch = await $`git branch --show-current`.text().then((x) => x.trim())
   if (!branch) return "detached"
   const channel = branch.replace(/[^a-zA-Z0-9._-]/g, "-")
@@ -35,6 +39,7 @@ const IS_PREVIEW = CHANNEL !== "latest"
 // The release workflow's plan job owns release versions; builds only read them.
 const VERSION = (() => {
   if (env.OPENCODE_VERSION) return env.OPENCODE_VERSION
+  if (LOCAL) return rootPkg.version
   if (!IS_PREVIEW) throw new Error("OPENCODE_VERSION is required for latest-channel builds")
   return `0.0.0-${CHANNEL}-${previewBuildNumber()}`
 })()
