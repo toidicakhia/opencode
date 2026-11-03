@@ -486,6 +486,15 @@ function normalizeExperimental(
         )
         if (value !== undefined) result.background_compaction = value
       }
+      if (own(experimental, "auto_background")) {
+        const value = decodeEncoded(
+          ConfigExperimental.Info.fields.auto_background,
+          experimental.auto_background,
+          ["experimental", "auto_background"],
+          diagnostics,
+        )
+        if (value !== undefined) result.auto_background = value
+      }
       if (own(experimental, "media_blob")) {
         const value = decodeEncoded(
           ConfigExperimental.Info.fields.media_blob,

@@ -16,6 +16,10 @@ export class Info extends Schema.Class<Info>("ConfigExperimental.Info")({
     description:
       "Enable experimental background compaction: summarize the conversation in the background as it nears the compaction threshold, so automatic compaction does not wait for the summary. Background summaries that are never used still cost tokens. Defaults to false.",
   }),
+  auto_background: Schema.Union([Schema.DurationFromString, Schema.Literal(false)]).pipe(optional).annotate({
+    description:
+      'Move a foreground shell command to the background after it runs this long. Foreground commands with an explicit timeout are never moved. Defaults to "30 seconds"; set to false to keep waiting.',
+  }),
   media_blob: Schema.Boolean.pipe(optional).annotate({
     description:
       "Store new session media once in a deduplicated blob table instead of inline in every message row. Defaults to false.",

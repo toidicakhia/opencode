@@ -4,8 +4,9 @@ import { ToolFailure } from "@opencode/ai/effect"
 import type { Context } from "@opencode/plugin/effect/plugin"
 import type { SessionHooks } from "@opencode/plugin/effect/session"
 import type { ShellCreateBefore } from "@opencode/plugin/effect/shell"
+import type { Document, Entry } from "@opencode/schema/config"
 import type { Tool } from "@opencode/schema/tool"
-import { Deferred, Effect, Schema, Scope } from "effect"
+import { Deferred, Duration, Effect, Schema, Scope } from "effect"
 import { Environment } from "../../environment/index.js"
 import { Job } from "../../job.js"
 import { FileAccess } from "../../file-access.js"
@@ -13,6 +14,7 @@ import { Permission } from "../../permission.js"
 import { NonNegativeInt } from "../../schema.js"
 import { Session } from "../../session.js"
 import { SessionSchema } from "../../session/schema.js"
+import { Config } from "../../config.js"
 import { Shell } from "../../shell.js"
 import { ShellParse } from "../../shell/parse.js"
 import { ShellSelect } from "../../shell/select.js"
@@ -20,6 +22,14 @@ import { ShellResult } from "../../shell/result.js"
 
 export const name = "shell"
 export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
+const DEFAULT_AUTO_BACKGROUND = Duration.seconds(30)
+
+// Read per field so a later config that sets other experimental options doesn't hide this one.
+const configuredAutoBackground = (entries: readonly Entry[]) =>
+  entries.findLast(
+    (entry): entry is Document =>
+      entry.type === "document" && entry.info.experimental?.auto_background !== undefined,
+  )?.info.experimental?.auto_background
 
 const BACKGROUND_INSTRUCTION =
   "You will be notified automatically when the command finishes. The notification will include the command's output. Unless the user explicitly asks otherwise, DO NOT poll for completion, even if you need the final result to continue. Repeatedly sleeping and reading or searching the output file is polling, not useful work. You may read the current output if it lets you do useful work now, but do not repeatedly check it while waiting for the command to finish. Keep working on anything that does not depend on the result. If you have nothing else to do, end your response; you will be resumed automatically when the command finishes."
@@ -40,6 +50,7 @@ const description = (shell?: string) =>
     "When output is large, the full result is saved to a file and a truncated preview is returned.",
     "Rely on automatic truncation unless filtering the output is more useful.",
     "Commands accept an optional timeout, background commands have no timeout by default.",
+    "Foreground commands without an explicit timeout move to the background automatically, and you are notified when they finish.",
     "Background commands return immediately, and you will be notified when they complete.",
   ].join(" ")
 
@@ -50,7 +61,7 @@ export const Input = Schema.Struct({
       "Working directory to execute the command in. Defaults to the current working directory. When possible, avoid changing directories in the command and set the working directory here instead.",
   }),
   timeout: Schema.optionalKey(NonNegativeInt).annotate({
-    description: `Timeout in milliseconds. Set to 0 to disable the timeout. Defaults to ${DEFAULT_TIMEOUT_MS} for foreground commands. Background commands have no timeout by default.`,
+    description: `Timeout in milliseconds. Set to 0 to disable the timeout. Defaults to ${DEFAULT_TIMEOUT_MS} for foreground commands, though a foreground command without an explicit timeout may move to the background first. Background commands have no timeout by default.`,
   }),
   background: Schema.optionalKey(Schema.Boolean).annotate({
     description:
@@ -91,8 +102,8 @@ const toolResult = (output: Output) => {
   }
 }
 
-const backgroundResult = (shellID: string, file: string) => ({
-  output: `Command moved to the background (shell ID: ${shellID}).\nOutput is streaming to: ${file}`,
+const backgroundResult = (shellID: string, file: string, automatic = false) => ({
+  output: `Command ${automatic ? "moved to the background automatically" : "moved to the background"} (shell ID: ${shellID}).\nOutput is streaming to: ${file}`,
   shellID,
   truncated: false,
   status: "running" as const,
@@ -106,6 +117,7 @@ export const Plugin = {
     const scope = yield* Scope.Scope
     const environment = yield* Environment.Service
     const access = yield* FileAccess.Service
+    const config = yield* Config.Service
     const shell = yield* Shell.Service
     const shellSelect = yield* ShellSelect.Service
     const compatibleShell = shellSelect.resolve({ priority: "compat" })
@@ -185,7 +197,17 @@ export const Plugin = {
           output: Output,
           execute: (input, context) =>
             Effect.gen(function* () {
-              const timeout = input.background === true ? (input.timeout ?? 0) : (input.timeout ?? DEFAULT_TIMEOUT_MS)
+              const autoBackground =
+                input.timeout === undefined && input.background !== true
+                  ? configuredAutoBackground(yield* config.entries())
+                  : false
+              const backgroundAfter =
+                autoBackground === false ? undefined : Duration.toMillis(autoBackground ?? DEFAULT_AUTO_BACKGROUND)
+              // Auto-background owns the deadline, so it must not race a foreground kill timeout.
+              const timeout =
+                input.background === true || backgroundAfter !== undefined
+                  ? (input.timeout ?? 0)
+                  : (input.timeout ?? DEFAULT_TIMEOUT_MS)
               let finalTimeout = timeout
               const info = yield* shell.create(
                 {
@@ -245,12 +267,16 @@ export const Plugin = {
               }
 
               const result = yield* jobs
-                .block({ id: job.id, sessionID: context.sessionID })
+                .block({
+                  id: job.id,
+                  sessionID: context.sessionID,
+                  ...(backgroundAfter === undefined ? {} : { backgroundAfter }),
+                })
                 .pipe(Effect.onInterrupt(() => jobs.cancel(job.id).pipe(Effect.ignore)))
               if (result?.type === "backgrounded") {
                 yield* shell.timeout(info.id, 0)
                 yield* notifyWhenDone(context.sessionID, job.id, info.id, info.command, settled)
-                return backgroundResult(info.id, info.file)
+                return backgroundResult(info.id, info.file, result.automatic === true)
               }
               if (result?.info.status === "error")
                 return yield* Effect.fail(new Error(result.info.error ?? "Command failed"))

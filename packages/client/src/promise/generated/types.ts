@@ -2503,6 +2503,7 @@ export type ConfigEntry =
           portable_shell_scanner?: boolean
           todo?: boolean
           background_compaction?: boolean
+          auto_background?: string | false
           media_blob?: boolean
           image_generate?: boolean | { model?: string | { providerID: string; model: string; variant?: string } }
           schedules?: boolean
