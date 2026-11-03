@@ -2548,6 +2548,7 @@ export type ConfigEntry =
           all_flags?: boolean
           todo?: boolean
           background_compaction?: boolean
+          auto_background?: string | false
           media_blob?: boolean
           schedules?: boolean
           artifacts?: boolean

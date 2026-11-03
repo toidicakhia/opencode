@@ -628,6 +628,7 @@ All experimental settings live under the `experimental` key:
     "todo": true,
     "subagent_depth": 2,
     "background_compaction": true,
+    "auto_background": "30 seconds",
     "image_generate": { "model": "openai/gpt-image-2" },
     "location_idle_timeout": "4 hours",
   },
@@ -653,6 +654,21 @@ automatic compaction doesn't pause the session. Defaults to `false`. See
 {
   "experimental": {
     "background_compaction": true,
+  },
+}
+```
+
+### Shell auto-background
+
+`auto_background` moves a foreground shell command to the background once it runs longer than the given duration. Defaults to
+`30 seconds`. Set it to `false` to keep waiting until the command finishes or times out.
+
+Foreground commands with an explicit `timeout` are never moved automatically; use the timeout as a hard limit.
+
+```jsonc
+{
+  "experimental": {
+    "auto_background": "1 minute",
   },
 }
 ```

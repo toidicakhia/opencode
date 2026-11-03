@@ -124,6 +124,10 @@ Background calls return immediately and notify the session when they finish;
 they have no timeout unless one is supplied. Large output is shortened and the
 complete output is retained in a managed file.
 
+Foreground calls without an explicit `timeout` move to the background after 30 seconds by default, then notify the
+session when they finish. Change or disable this with
+[`experimental.auto_background`](/config#shell-auto-background).
+
 Permission: `shell` with each scanner-produced command as a resource. The
 scanner also checks an external working directory and directories it can infer
 from the command. Shell has the host user's filesystem, process, and network

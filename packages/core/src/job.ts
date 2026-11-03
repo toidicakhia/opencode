@@ -105,9 +105,20 @@ export type WaitResult = {
 export type BlockInput = {
   id: string
   sessionID: SessionSchema.ID
+  /** Move the job to the background when it is still running after this many milliseconds. */
+  backgroundAfter?: number
 }
 
-export type BlockResult = { type: "finished"; info: Info } | { type: "backgrounded"; info: Info }
+export type BlockResult =
+  | { type: "finished"; info: Info }
+  | { type: "backgrounded"; info: Info; automatic?: boolean }
+
+type AutoBackgroundResult = {
+  info: Info
+  generation?: Scope.Closeable
+  backgrounded?: Deferred.Deferred<Info>
+  isBackgrounded?: boolean
+}
 
 export type BackgroundAllInput = {
   sessionID: SessionSchema.ID
@@ -357,6 +368,40 @@ export const make = Effect.gen(function* () {
     })
   })
 
+  const markBackground = Effect.fnUntraced(function* (job: Active) {
+    const next = {
+      ...job,
+      isBackgrounded: true,
+      blockingSessions: new Map<SessionSchema.ID, number>(),
+      info: {
+        ...job.info,
+        ...(job.recovery ? { notificationID: job.info.notificationID ?? SessionMessage.ID.create() } : {}),
+      },
+    }
+    yield* persistBackground(next)
+    return next
+  })
+
+  const backgroundIfRunning = Effect.fnUntraced(function* (id: string) {
+    return yield* SynchronizedRef.modifyEffect(
+      state.jobs,
+      (jobs): Effect.Effect<readonly [AutoBackgroundResult | undefined, Map<string, Active>]> => {
+        const job = jobs.get(id)
+        if (!job || job.info.status !== "running" || job.isBackgrounded)
+          return Effect.succeed([
+            job ? { info: snapshot(job), generation: job.scope, isBackgrounded: job.isBackgrounded } : undefined,
+            jobs,
+          ])
+        return markBackground(job).pipe(
+          Effect.map((next) => [
+            { info: snapshot(next), backgrounded: job.backgrounded },
+            new Map(jobs).set(id, next),
+          ] as const),
+        )
+      },
+    )
+  })
+
   const block: Interface["block"] = Effect.fnUntraced(function* (input) {
     const result = yield* SynchronizedRef.modify(state.jobs, (jobs): readonly [BlockStart, Map<string, Active>] => {
       const job = jobs.get(input.id)
@@ -377,27 +422,30 @@ export const make = Effect.gen(function* () {
       return { type: "finished", info: result.info }
     }
     if (result.type === "backgrounded") return { type: "backgrounded", info: result.info }
-    return yield* Effect.raceFirst(
+    const waiting = Effect.raceFirst(
       Deferred.await(result.wait.done).pipe(Effect.map((info) => ({ type: "finished" as const, info }))),
       Deferred.await(result.wait.backgrounded).pipe(Effect.map((info) => ({ type: "backgrounded" as const, info }))),
+    )
+    const outcome = yield* (input.backgroundAfter === undefined
+      ? waiting
+      : Effect.raceFirst(
+          waiting,
+          Effect.sleep(input.backgroundAfter).pipe(Effect.as({ type: "deadline" as const })),
+        )
     ).pipe(
       Effect.tap((outcome) => (outcome.type === "finished" ? consume(input.id, result.wait.generation) : Effect.void)),
       Effect.ensuring(removeBlock(input)),
     )
-  })
+    if (outcome.type !== "deadline") return outcome
 
-  const markBackground = Effect.fnUntraced(function* (job: Active) {
-    const next = {
-      ...job,
-      isBackgrounded: true,
-      blockingSessions: new Map<SessionSchema.ID, number>(),
-      info: {
-        ...job.info,
-        ...(job.recovery ? { notificationID: job.info.notificationID ?? SessionMessage.ID.create() } : {}),
-      },
+    const automatic = yield* backgroundIfRunning(input.id)
+    if (!automatic) return undefined
+    if (automatic.backgrounded) yield* Deferred.succeed(automatic.backgrounded, automatic.info)
+    if (automatic.info.status !== "running" && !automatic.isBackgrounded) {
+      if (automatic.generation) yield* consume(input.id, automatic.generation)
+      return { type: "finished" as const, info: automatic.info }
     }
-    yield* persistBackground(next)
-    return next
+    return { type: "backgrounded" as const, info: automatic.info, automatic: true }
   })
 
   const background: Interface["background"] = Effect.fn("Job.background")(function* (id) {

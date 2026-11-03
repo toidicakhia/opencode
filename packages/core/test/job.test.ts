@@ -10,6 +10,7 @@ import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Global } from "@opencode/util/global"
 import { eq, like } from "drizzle-orm"
 import { Cause, Deferred, Effect, Exit, Fiber, Scope } from "effect"
+import { TestClock } from "effect/testing"
 import { SessionMessage } from "@opencode/core/session/message"
 import { SessionSchema } from "@opencode/core/session/schema"
 import { testEffect } from "./lib/effect"
@@ -203,6 +204,41 @@ describe("Job", () => {
         type: "backgrounded",
         info: { id: job.id, status: "running" },
       })
+
+      yield* Deferred.succeed(latch, undefined)
+      expect(yield* jobs.wait({ id: job.id })).toMatchObject({
+        timedOut: false,
+        info: { status: "completed", output: "done" },
+      })
+    }),
+  )
+
+  it.effect("moves a blocking wait to the background at its deadline", () =>
+    Effect.gen(function* () {
+      const jobs = yield* Job.Service
+      const latch = yield* Deferred.make<void>()
+      const job = yield* jobs.start({
+        id: "job_auto_background",
+        type: "test",
+        run: Deferred.await(latch).pipe(Effect.as("done")),
+      })
+      const waiting = yield* jobs
+        .block({
+          id: job.id,
+          sessionID: SessionSchema.ID.make("ses_parent"),
+          backgroundAfter: 1_000,
+        })
+        .pipe(Effect.forkIn(yield* Scope.Scope, { startImmediately: true }))
+
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("1 second")
+
+      expect(yield* Fiber.join(waiting)).toMatchObject({
+        type: "backgrounded",
+        automatic: true,
+        info: { id: job.id, status: "running" },
+      })
+      expect(yield* jobs.get(job.id)).toMatchObject({ status: "running" })
 
       yield* Deferred.succeed(latch, undefined)
       expect(yield* jobs.wait({ id: job.id })).toMatchObject({

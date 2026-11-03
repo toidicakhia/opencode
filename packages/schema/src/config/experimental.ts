@@ -19,6 +19,10 @@ export class Info extends Schema.Class<Info>("ConfigExperimental.Info")({
       description: `${description} Defaults to on in local and dev builds and off in releases.`,
     }),
   ),
+  auto_background: Schema.Union([Schema.DurationFromString, Schema.Literal(false)]).pipe(optional).annotate({
+    description:
+      'Move a foreground shell command to the background after it runs this long. Foreground commands with an explicit timeout are never moved. Defaults to "30 seconds"; set to false to keep waiting.',
+  }),
   part_rows: Schema.Boolean.pipe(optional).annotate({
     description:
       "Write each assistant part as its own session_part row instead of rewriting the whole message on every event. Defaults to false.",

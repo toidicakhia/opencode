@@ -1166,6 +1166,7 @@ describe("ShellTool", () => {
             }),
           ),
           deps: [
+            Config.node,
             Environment.node,
             FileAccess.node,
             Permission.node,
@@ -1635,6 +1636,66 @@ describe("ShellTool", () => {
           yield* shell.remove(id)
         }),
       )
+    }),
+  )
+
+  it.live("moves a foreground command to the background automatically", () =>
+    withTempDir((tmp) => {
+      reset()
+      return Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(tmp.path, "opencode.json"),
+            JSON.stringify({ experimental: { auto_background: "50 millis" } }),
+          ),
+        )
+        return yield* withSession(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const settled = yield* executeTool(registry, call({ command: idleCommand }, "call-auto-background"))
+            const shellID = typeof settled.metadata?.shellID === "string" ? settled.metadata.shellID : undefined
+            expect(settled.metadata).toMatchObject({ status: "running", truncated: false })
+            expect(shellID).toStartWith("sh_")
+            if (!shellID) return
+
+            const shell = yield* Shell.Service
+            const id = ID.make(shellID)
+            const info = yield* shell.get(id)
+            expect(settled.content?.[0]).toEqual({
+              type: "text",
+              text: `Command moved to the background automatically (shell ID: ${shellID}).\nOutput is streaming to: ${info.file}`,
+            })
+            expect((yield* shell.get(id)).status).toBe("running")
+            yield* shell.remove(id)
+          }),
+        )
+      })
+    }),
+  )
+
+  it.live("keeps an explicit timeout as a hard limit", () =>
+    withTempDir((tmp) => {
+      reset()
+      return Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(tmp.path, "opencode.json"),
+            JSON.stringify({ experimental: { auto_background: "50 millis" } }),
+          ),
+        )
+        return yield* withSession(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const settled = yield* executeTool(
+              registry,
+              call({ command: idleCommand, timeout: 50 }, "call-explicit-timeout"),
+            )
+            expect(settled.metadata).toMatchObject({ status: "completed", timeout: true })
+            expect(settled.content).toContainEqual({
+              type: "text",
+              text: expect.stringContaining("Timed out before completion"),
+            })
+          }),
+        )
+      })
     }),
   )
 })
