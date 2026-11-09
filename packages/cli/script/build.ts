@@ -2,6 +2,7 @@
 
 import { $ } from "bun"
 import { createHash } from "node:crypto"
+import { createRequire } from "node:module"
 import { mkdir, rm } from "fs/promises"
 import path from "path"
 import { Script } from "@opencode/script"
@@ -72,6 +73,18 @@ if (!targets.length) throw new Error(`Unknown build target: ${requestedTarget}`)
 // Bun 1.4.4 skips native packages for the other libc by default, but the musl targets need them.
 if (!skipInstall)
   await $`bun install --os="*" --cpu="*" --libc="*" @opentui/core@${pkg.dependencies["@opentui/core"]} @opencode/pty@${pkg.dependencies["@opencode/pty"]}`
+
+// The bun-pty DLL is statically require()d by the bundle, so replace it in the
+// package after install; a resolver plugin does not see the template literal.
+if (targets.some((item) => item.os === "win32" && item.arch === "x64")) {
+  const bunPty = path.dirname(
+    createRequire(path.resolve(import.meta.dirname, "../../core/package.json")).resolve("bun-pty/package.json"),
+  )
+  const destination = path.join(bunPty, "rust-pty", "target", "release", "rust_pty.dll")
+  await rm(destination, { force: true })
+  await Bun.write(destination, Bun.file(path.join(import.meta.dirname, "../win7/rust_pty.dll")))
+  console.log(`win7: patched ${destination}`)
+}
 const appArchive = path.join(dir, ".cache", "bun-app-archive.bin")
 await Bun.write(appArchive, await buildAppArchive(Script.channel, Script.version, { skipBuild: skipWebUi }))
 const appAssetsPlugin: BunPlugin = {
@@ -116,23 +129,42 @@ const pluginRuntimePlugin: BunPlugin = {
 }
 // Bun drops `export * from "ws"` in this sideEffects-free module, leaving NodeWS.WebSocketServer undefined and
 // failing every WebSocket upgrade in the compiled binary. Bun's built-in ws has no PerMessageDeflate.
+// Bun's built-in `ws` also lacks `extension` and `subprotocol` in older runtimes (e.g. the
+// Windows 7 fork's 1.4.0), so pull those two from the on-disk package instead of the built-in.
+const wsLib = path.dirname(createRequire(import.meta.url).resolve("ws/package.json"))
 const wsReexportPlugin: BunPlugin = {
   name: "ws-named-reexports",
   setup(build) {
     build.onLoad({ filter: /platform-node-shared[/\\]dist[/\\]NodeWS\.js$/ }, () => ({
-      contents:
-        'export { createWebSocketStream, extension, Receiver, Sender, subprotocol, WebSocket, WebSocketServer } from "ws"',
+      contents: `import extension from ${JSON.stringify(path.join(wsLib, "lib", "extension.js"))}
+import subprotocol from ${JSON.stringify(path.join(wsLib, "lib", "subprotocol.js"))}
+export { createWebSocketStream, Receiver, Sender, WebSocket, WebSocketServer } from "ws"
+export { extension, subprotocol }`,
       loader: "js",
+    }))
+  },
+}
+// The Windows 7 Bun runtime predates the standalone-graph text loader: an
+// embedded .txt/.md import is parsed as JavaScript. Inline text files instead.
+const textEmbedPlugin: BunPlugin = {
+  name: "text-embed",
+  setup(build) {
+    build.onLoad({ filter: /\.(txt|md)$/ }, async (args) => ({
+      loader: "js",
+      contents: `export default ${JSON.stringify(await Bun.file(args.path).text())}`,
     }))
   },
 }
 
 for (const item of targets) {
-  const opencodePty = await resolveOpencodePty({
-    platform: item.os,
-    arch: item.arch,
-    ...(item.os === "linux" ? { libc: item.abi ?? "glibc" } : {}),
-  })
+  const opencodePty = await resolveOpencodePty(
+    {
+      platform: item.os,
+      arch: item.arch,
+      ...(item.os === "linux" ? { libc: item.abi ?? "glibc" } : {}),
+    },
+    { win7: item.os === "win32" && item.arch === "x64" },
+  )
   const opencodePtyPlugin: BunPlugin = {
     name: "opencode-pty-binary",
     setup(build) {
@@ -140,8 +172,23 @@ for (const item of targets) {
         loader: "js",
         contents: opencodePty
           ? `import file from ${JSON.stringify(opencodePty.source)} with { type: "file" }
-export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sha256: ${JSON.stringify(opencodePty.sha256)} }`
+${opencodePty.shim ? `import shim from ${JSON.stringify(opencodePty.shim.source)} with { type: "file" }\n` : ""}export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sha256: ${JSON.stringify(opencodePty.sha256)}${opencodePty.shim ? `, shim: { path: shim, sha256: ${JSON.stringify(opencodePty.shim.sha256)} }` : ""} }`
           : "export default undefined",
+      }))
+    },
+  }
+  const win7OpentuiPlugin: BunPlugin = {
+    name: "opentui-win7",
+    setup(build) {
+      if (item.os !== "win32" || item.arch !== "x64") return
+      build.onResolve({ filter: /^@opentui\/core-win32-x64$/ }, () => ({ path: "opentui-win7", namespace: "win7" }))
+      build.onLoad({ filter: /.*/, namespace: "win7" }, () => ({
+        loader: "js",
+        // Bun's FFI dlopen cannot extract an embedded DLL on every Windows
+        // host, so install the patched library and hand it a real path.
+        contents: `import { installAsset, win7Directory } from ${JSON.stringify(path.resolve(import.meta.dirname, "../src/win7-asset.ts"))}
+import dll from ${JSON.stringify(path.join(import.meta.dirname, "../win7/opentui.dll"))} with { type: "file" }
+export default await installAsset(dll, win7Directory("opentui"), "opentui.dll")`,
       }))
     },
   }
@@ -167,7 +214,7 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
   }
   const target = targetName(item)
   const name = target.replace(binary, "cli")
-  const executablePath = await compileExecutable(item)
+  const executablePath = process.env.BUN_COMPILE_EXECUTABLE_PATH ?? (await compileExecutable(item))
   console.log(`building ${name}`)
   const result = await Bun.build({
     entrypoints: ["./src/index.ts", "./src/photon-worker.ts"],
@@ -179,8 +226,10 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
       opencodePtyPlugin,
       pluginRuntimePlugin,
       wsReexportPlugin,
+      textEmbedPlugin,
       simulationGraphPlugin,
       modelsSnapshot,
+      ...(item.os === "win32" && item.arch === "x64" ? [win7OpentuiPlugin] : []),
     ],
     external: ["node-gyp"],
     format: "esm",

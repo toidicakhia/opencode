@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import "./win7"
 import { ensurePluginRuntime } from "@opencode/plugin/runtime"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { Cause, Effect } from "effect"
