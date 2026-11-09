@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  lint:
+    name: lint
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Lint
+        run: bun run lint
+
+  typecheck:
+    name: typecheck
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      # Local `bun run check` uses `bun check`; CI keeps the official TypeScript compiler as the source of truth.
+      - name: Typecheck (TypeScript 7.1)
+        run: bun run typecheck:tsc
+
+  test:
+    name: test
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "opencode"
+
+      # The runner has four vCPUs and every Bun test process spawns its own concurrent work,
+      # so keep two suites in flight instead of crowding the box.
+      - name: Run tests
+        run: GITHUB_ACTIONS=false bun turbo test --concurrency=2
